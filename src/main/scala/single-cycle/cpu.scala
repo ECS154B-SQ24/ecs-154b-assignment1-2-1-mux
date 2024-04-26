@@ -23,10 +23,7 @@ class SingleCycleCPU(implicit val conf: CPUConfig) extends BaseCPU {
   val controlTransfer = Module(new ControlTransferUnit())
   val (cycleCount, _) = Counter(true.B, 1 << 30)
 
-  control.io := DontCare
-  registers.io := DontCare
-  aluControl.io := DontCare
-  alu.io := DontCare
+  // these fields are not required for R-type instructions
   immGen.io := DontCare
   controlTransfer.io := DontCare
   io.dmem <> DontCare
@@ -43,6 +40,54 @@ class SingleCycleCPU(implicit val conf: CPUConfig) extends BaseCPU {
   }
 
   //Your code goes here
+
+  // increment PC to move the processor to the next instruction
+  // for multi-cycle instructions
+  val nextPC = pc + 4.U
+  pc := nextPC
+
+  control.io.opcode := instruction(6, 0)
+
+  // create wire to connect aluop from control output to aluControl input
+  val aluop = Wire(UInt(3.W))
+  aluop := control.io.aluop
+
+  registers.io.readreg1 := instruction(19, 15)
+  registers.io.readreg2 := instruction(24, 20)
+  registers.io.writereg := instruction(11, 7)
+  // set the write enable bit to write the result back to destination reg
+  registers.io.wen := 1.U
+  
+  // connect the other end of the aluop wire
+  aluControl.io.aluop := aluop
+  aluControl.io.funct7 := instruction(31, 25)
+  aluControl.io.funct3 := instruction(14, 12)
+  
+  // connect operation from aluControl output to alu input
+  val operation = Wire(UInt(5.W))
+  operation := aluControl.io.operation
+  alu.io.operation := operation
+
+  // get operand 1 and operand 2 from registers
+  val regData1 = Wire(UInt(64.W))
+  val regData2 = Wire(UInt(64.W))
+  regData1 := registers.io.readdata1
+  regData2 := registers.io.readdata2
+
+  alu.io.operand1 := regData1
+  alu.io.operand2 := regData2
+
+  // connect result from alu output to register write data input
+  val result = Wire(UInt(64.W))
+  result := alu.io.result
+
+  // register x0 should always hold the value 0
+  // so we only write the result when the destination reg is not 0
+  when (registers.io.writereg === 0.U) {
+    registers.io.writedata := 0.U
+  }.otherwise {
+    registers.io.writedata := result
+  }
 
 }
 
